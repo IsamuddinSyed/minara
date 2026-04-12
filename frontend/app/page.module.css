@@ -1,0 +1,119 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.main {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  width: 100%;
+}
+
+.title {
+  font-size: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.lead {
+  color: #555;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  .lead {
+    color: #aaa;
+  }
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.input {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.button {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #111;
+  color: #fff;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error {
+  color: #b00020;
+  margin: 0.75rem 0;
+  line-height: 1.4;
+}
+
+.results {
+  margin-top: 2rem;
+}
+
+.results h2 {
+  font-size: 1.1rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.fullText {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  margin-bottom: 0.5rem;
+}
+
+.words {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.875rem;
+}
+
+.wordRow {
+  display: grid;
+  grid-template-columns: 5.5rem 5.5rem 1fr;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .wordRow {
+    border-bottom-color: #333;
+  }
+}
+
+.wordHeader {
+  font-weight: 600;
+  border-bottom: 2px solid #999;
+}
+
+.muted {
+  color: #666;
+  font-size: 0.95rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .muted {
+    color: #888;
+  }
+}
