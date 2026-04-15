@@ -62,6 +62,97 @@
   cursor: not-allowed;
 }
 
+.buttonSecondary {
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  cursor: pointer;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.buttonSecondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.momentsActions {
+  margin: 1rem 0 1.25rem;
+}
+
+.momentsSection {
+  margin: 1.5rem 0 2rem;
+}
+
+.momentsSection h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
+}
+
+.cardList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  background: var(--background);
+}
+
+@media (prefers-color-scheme: dark) {
+  .card {
+    border-color: #444;
+  }
+}
+
+.cardTitle {
+  font-size: 1.05rem;
+  margin: 0 0 0.5rem;
+  line-height: 1.35;
+}
+
+.cardMeta {
+  font-size: 0.9rem;
+  color: #555;
+  margin: 0 0 0.65rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .cardMeta {
+    color: #aaa;
+  }
+}
+
+.cardMetaSep {
+  margin: 0 0.35rem;
+}
+
+.cardTakeaway,
+.cardReason,
+.cardExcerpt {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0.4rem 0 0;
+}
+
+.cardExcerpt {
+  margin-top: 0.65rem;
+  color: #444;
+}
+
+@media (prefers-color-scheme: dark) {
+  .cardExcerpt {
+    color: #bbb;
+  }
+}
+
 .error {
   color: #b00020;
   margin: 0.75rem 0;
