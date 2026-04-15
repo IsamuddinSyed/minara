@@ -1,5 +1,6 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
+openai>=1.55.0
 assemblyai>=0.48.0
 yt-dlp>=2024.12.0
 python-dotenv>=1.0.0

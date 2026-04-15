@@ -2,14 +2,20 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import Any, Optional
 
 import assemblyai as aai
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from openai import OpenAI
+from pydantic import BaseModel, Field, field_validator, model_validator
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
+from moments_llm import select_candidate_sentence_ranges
+from moments_preprocess import build_sentence_units
+from moments_prompt import IDENTIFY_MOMENTS_SYSTEM, build_candidate_reasoning_input
+from moments_validate import validate_and_build_final_clips
 
 _BACKEND_DIR = Path(__file__).resolve().parent
 load_dotenv(_BACKEND_DIR / ".env")
@@ -46,6 +52,106 @@ class TranscribeRequest(BaseModel):
         if not any(h in s for h in YOUTUBE_HINTS):
             raise ValueError("URL must be a YouTube link")
         return s
+
+
+class WordSpan(BaseModel):
+    word: str
+    start: float
+    end: float
+
+
+class TranscriptIn(BaseModel):
+    """Same shape as POST /transcribe response; extras are ignored for prompting."""
+
+    text: str
+    words: list[WordSpan] = Field(default_factory=list)
+    task: Optional[str] = None
+    language: Optional[str] = None
+    duration: Optional[float] = None
+    segments: Optional[list[Any]] = None
+
+    @model_validator(mode="after")
+    def transcript_must_have_content(self) -> "TranscriptIn":
+        if not self.text or not self.text.strip():
+            raise ValueError("text must not be empty")
+        if not self.words:
+            raise ValueError("words must not be empty for moment alignment")
+        return self
+
+
+class Clip(BaseModel):
+    start_time: float
+    end_time: float
+    duration: float
+    title: str
+    takeaway: str
+    reason: str
+    confidence_score: float = Field(ge=0.0, le=1.0)
+    transcript_excerpt: str
+
+
+class MomentsResponse(BaseModel):
+    clips: list[Clip] = Field(min_length=2, max_length=5)
+
+
+@app.post("/identify-moments")
+def identify_moments(body: TranscriptIn):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key or not api_key.strip():
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "OPENAI_API_KEY is missing or empty. Set it in backend/.env "
+                "(same folder as main.py), then restart the API server."
+            ),
+        )
+
+    try:
+        sentence_units = build_sentence_units(body.words)
+        if len(sentence_units) < 3:
+            raise HTTPException(
+                status_code=422,
+                detail="Transcript could not be segmented into enough sentence units.",
+            )
+
+        user_message = build_candidate_reasoning_input(
+            sentence_units=sentence_units,
+            meta={"language": body.language, "duration": body.duration},
+        )
+        client = OpenAI(api_key=api_key.strip())
+        candidates = select_candidate_sentence_ranges(
+            client=client,
+            model="gpt-4o",
+            system_prompt=IDENTIFY_MOMENTS_SYSTEM,
+            user_message=user_message,
+        )
+        final_clips = validate_and_build_final_clips(candidates, sentence_units)
+        payload = {
+            "clips": [
+                {
+                    "start_time": clip.start_time,
+                    "end_time": clip.end_time,
+                    "duration": clip.duration,
+                    "title": clip.title,
+                    "takeaway": clip.takeaway,
+                    "reason": clip.reason,
+                    "confidence_score": clip.confidence_score,
+                    "transcript_excerpt": clip.transcript_excerpt,
+                }
+                for clip in final_clips
+            ]
+        }
+        validated = MomentsResponse.model_validate(payload)
+        return validated.model_dump(mode="json")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid clip selection: {e}") from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Key moment identification failed: {e}",
+        ) from e
 
 
 def download_youtube_audio(url: str) -> tuple[Path, str]:
