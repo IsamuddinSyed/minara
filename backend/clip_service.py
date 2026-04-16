@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import shutil
 import subprocess
@@ -15,6 +16,8 @@ from shortform_service import (
 )
 from subtitles_service import SubtitleWord
 from video_source import SourceVideoAsset
+
+logger = logging.getLogger(__name__)
 
 
 class ClipGenerationSetupError(RuntimeError):
@@ -49,6 +52,7 @@ class GeneratedClip:
     width: int | None = None
     height: int | None = None
     subtitle_file_path: str | None = None
+    hook_headline: str | None = None
 
 
 @dataclass(slots=True)
@@ -194,12 +198,20 @@ def generate_clips(
                         start_time=moment.start_time,
                         end_time=moment.end_time,
                         transcript_words=normalized_words,
+                        title=moment.title,
+                        takeaway=moment.takeaway,
+                        transcript_excerpt="",
                     )
                 except ShortformProcessingError as exc:
                     processing_detail = str(exc)
 
             preview_url = (
                 processed_asset.preview_url if processed_asset else preview_url_for(output_path)
+            )
+            logger.info(
+                "Clip %s preview selection: %s",
+                clip_id,
+                "processed" if processed_asset else "raw",
             )
             clips.append(
                 GeneratedClip(
@@ -217,6 +229,10 @@ def generate_clips(
                     processed_preview_url=processed_asset.preview_url if processed_asset else None,
                     width=processed_asset.width if processed_asset else None,
                     height=processed_asset.height if processed_asset else None,
+                    subtitle_file_path=(
+                        processed_asset.subtitle_file_path if processed_asset else None
+                    ),
+                    hook_headline=processed_asset.hook_headline if processed_asset else None,
                     preview_url=preview_url,
                 )
             )

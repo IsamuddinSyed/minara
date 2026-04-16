@@ -76,6 +76,17 @@ def stable_subtitle_filename(
     return f"{stem}.ass"
 
 
+def stable_hook_filename(
+    video_id: str,
+    rank: int,
+    start_time: float,
+    end_time: float,
+) -> str:
+    base = stable_clip_filename(video_id, rank, start_time, end_time)
+    stem = Path(base).stem
+    return f"{stem}_hook.txt"
+
+
 def preview_url_for(path: Path) -> str:
     relative = path.relative_to(MEDIA_ROOT)
     return f"/media/{relative.as_posix()}"

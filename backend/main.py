@@ -156,6 +156,8 @@ class GeneratedClipOut(BaseModel):
     processed_preview_url: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    subtitle_file_path: Optional[str] = None
+    hook_headline: Optional[str] = None
     preview_url: str
 
 
@@ -280,6 +282,8 @@ def generate_clips_endpoint(body: GenerateClipsRequest):
                     "processed_preview_url": clip.processed_preview_url,
                     "width": clip.width,
                     "height": clip.height,
+                    "subtitle_file_path": clip.subtitle_file_path,
+                    "hook_headline": clip.hook_headline,
                     "preview_url": clip.preview_url,
                 }
                 for clip in generated_clips

@@ -252,7 +252,18 @@ export default function Home() {
           parseErrorDetail(data, res.statusText || `Request failed (${res.status})`),
         );
       }
-      setGeneratedClips(data as GeneratedClipsResult);
+      const generated = data as GeneratedClipsResult;
+      console.info(
+        "Minara clip previews",
+        generated.clips.map((clip) => ({
+          clipId: clip.clip_id,
+          previewSource: clip.processed_preview_url ? "processed" : "raw",
+          previewUrl: clip.preview_url,
+          width: clip.width,
+          height: clip.height,
+        })),
+      );
+      setGeneratedClips(generated);
       setActiveView("clips");
     } catch (err) {
       setClipsError(

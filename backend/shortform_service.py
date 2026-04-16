@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from hook_service import derive_hook_headline
 from media_paths import (
     preview_url_for,
     processed_clip_output_dir,
+    stable_hook_filename,
     stable_processed_clip_filename,
     stable_subtitle_filename,
     subtitles_output_dir,
@@ -24,6 +27,8 @@ from subtitles_service import (
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
 
+logger = logging.getLogger(__name__)
+
 
 class ShortformProcessingError(RuntimeError):
     """Raised when a short-form render cannot be produced."""
@@ -35,6 +40,8 @@ class ProcessedClipAsset:
     preview_url: str
     width: int
     height: int
+    subtitle_file_path: str
+    hook_headline: str | None = None
 
 
 def _probe_dimensions(path: Path) -> tuple[int, int]:
@@ -70,7 +77,49 @@ def _probe_dimensions(path: Path) -> tuple[int, int]:
     return width, height
 
 
-def _build_video_filter(width: int, height: int, subtitle_path: str) -> str:
+def _validate_processed_dimensions(path: Path) -> None:
+    width, height = _probe_dimensions(path)
+    if width != TARGET_WIDTH or height != TARGET_HEIGHT:
+        raise ShortformProcessingError(
+            f"Processed output must be {TARGET_WIDTH}x{TARGET_HEIGHT}, got {width}x{height}."
+        )
+
+
+def _escape_filter_path(path: str) -> str:
+    return path.replace("\\", "\\\\").replace(":", r"\:")
+
+
+def _build_hook_filter(hook_text_path: str) -> str:
+    safe_path = _escape_filter_path(hook_text_path)
+    return (
+        "drawtext="
+        f"fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+        f"textfile='{safe_path}':"
+        "reload=0:"
+        "fontcolor=white:"
+        "fontsize=78:"
+        "line_spacing=8:"
+        "x='if(lt(t,0.18),(w-text_w)/2+((0.18-t)/0.18)*90,if(lt(t,2.35),(w-text_w)/2,(w-text_w)/2+((t-2.35)/0.65)*260))':"
+        "y='if(lt(t,0.18),150+((t/0.18)*40),if(lt(t,2.35),190,190-((t-2.35)/0.65)*60))':"
+        "box=1:"
+        "boxcolor=black@0.6:"
+        "boxborderw=30:"
+        "borderw=3:"
+        "bordercolor=black@0.5:"
+        "shadowx=0:"
+        "shadowy=10:"
+        "shadowcolor=black@0.22:"
+        "alpha='if(lt(t,0.18),t/0.18,if(lt(t,2.35),1,max(0,(3-t)/0.65)))':"
+        "enable='lt(t,3)'"
+    )
+
+
+def _build_video_filter(
+    width: int,
+    height: int,
+    subtitle_path: str,
+    hook_text_path: str | None,
+) -> str:
     source_ratio = width / height
     target_ratio = TARGET_WIDTH / TARGET_HEIGHT
 
@@ -87,12 +136,15 @@ def _build_video_filter(width: int, height: int, subtitle_path: str) -> str:
         crop_x = 0
         crop_y = max(0, (height - crop_height) // 2)
 
-    safe_subtitle_path = subtitle_path.replace("\\", "\\\\").replace(":", r"\:")
-    return (
+    filters = (
         f"crop={crop_width}:{crop_height}:{crop_x}:{crop_y},"
         f"scale={TARGET_WIDTH}:{TARGET_HEIGHT},"
-        f"subtitles='{safe_subtitle_path}'"
+        "setsar=1,"
+        f"subtitles='{_escape_filter_path(subtitle_path)}'"
     )
+    if hook_text_path:
+        filters += "," + _build_hook_filter(hook_text_path)
+    return filters
 
 
 def _run_shortform_render(
@@ -103,6 +155,8 @@ def _run_shortform_render(
 ) -> None:
     container_input = host_media_path_to_container(raw_clip_path)
     container_output = host_media_path_to_container(output_path)
+    logger.info("Starting short-form render to %s", output_path)
+    logger.info("Short-form FFmpeg filter graph: %s", video_filter)
 
     try:
         proc = run_in_render_container(
@@ -138,6 +192,7 @@ def _run_shortform_render(
         )
     if not output_path.exists():
         raise ShortformProcessingError("Render completed but processed output file was not created.")
+    _validate_processed_dimensions(output_path)
 
 
 def render_shortform_clip(
@@ -148,6 +203,9 @@ def render_shortform_clip(
     start_time: float,
     end_time: float,
     transcript_words: Sequence[SubtitleWord],
+    title: str,
+    takeaway: str,
+    transcript_excerpt: str = "",
 ) -> ProcessedClipAsset:
     if not raw_clip_path.exists():
         raise ShortformProcessingError(f"Raw clip file does not exist: {raw_clip_path}")
@@ -179,6 +237,25 @@ def render_shortform_clip(
         write_ass_subtitles(subtitle_path, cues)
     except Exception as exc:
         raise ShortformProcessingError(f"Subtitle generation failed: {exc}") from exc
+    logger.info("Generated subtitle file for clip render: %s", subtitle_path)
+
+    hook_headline = derive_hook_headline(
+        title=title,
+        takeaway=takeaway,
+        transcript_excerpt=transcript_excerpt,
+    )
+    hook_text_path: Path | None = None
+    if hook_headline:
+        hook_text_path = subtitles_dir / stable_hook_filename(
+            video_id=video_id,
+            rank=rank,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        try:
+            hook_text_path.write_text(hook_headline, encoding="utf-8")
+        except Exception as exc:
+            raise ShortformProcessingError(f"Hook generation failed: {exc}") from exc
 
     width, height = _probe_dimensions(raw_clip_path)
     output_dir = processed_clip_output_dir(video_id)
@@ -191,7 +268,15 @@ def render_shortform_clip(
 
     try:
         container_subtitle_path = host_media_path_to_container(subtitle_path)
-        filter_graph = _build_video_filter(width, height, container_subtitle_path)
+        container_hook_path = (
+            host_media_path_to_container(hook_text_path) if hook_text_path else None
+        )
+        filter_graph = _build_video_filter(
+            width,
+            height,
+            container_subtitle_path,
+            container_hook_path,
+        )
         _run_shortform_render(
             raw_clip_path=raw_clip_path,
             output_path=output_path,
@@ -206,4 +291,6 @@ def render_shortform_clip(
         preview_url=preview_url_for(output_path),
         width=TARGET_WIDTH,
         height=TARGET_HEIGHT,
+        subtitle_file_path=str(subtitle_path),
+        hook_headline=hook_headline,
     )
