@@ -2,6 +2,7 @@
 backend/.env
 backend/.venv/
 backend/__pycache__/
+backend/media/
 
 # Frontend
 frontend/.env.local
