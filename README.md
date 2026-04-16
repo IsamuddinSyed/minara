@@ -8,7 +8,7 @@ There is no database, auth, or deployment in these phases.
 
 1. **Python 3.10+** — check with `python3 --version`
 2. **Node.js** (LTS) — check with `node --version`
-3. **ffmpeg** — required for `yt-dlp` to extract audio  
+3. **ffmpeg** — required on the host for `yt-dlp` audio extraction and raw clip creation  
    - macOS (Homebrew): `brew install ffmpeg`  
    - Then verify: `ffmpeg -version`
 4. **AssemblyAI API key** — transcription (`/transcribe`), backend only  
@@ -58,6 +58,30 @@ uvicorn main:app --reload --host 127.0.0.1 --port 8000
 
 Interactive docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
+## Docker render setup
+
+Final short-form renders use a Dockerized FFmpeg environment so subtitle burn-in and `ffprobe` behavior stay consistent across machines.
+
+Build the render image once:
+
+```bash
+./scripts/render-build.sh
+```
+
+Verify the container has `ffmpeg`, `ffprobe`, and subtitle support:
+
+```bash
+./scripts/render-check.sh
+```
+
+Optional: open a shell inside the render container:
+
+```bash
+./scripts/render-shell.sh
+```
+
+The render container mounts `backend/media` at `/workspace/media`, which is where raw clips, subtitle files, and processed clips are shared between the backend and Docker.
+
 ## Frontend setup
 
 ```bash
@@ -82,6 +106,7 @@ Open the URL shown (usually [http://localhost:3000](http://localhost:3000)).
 1. Terminal A: activate venv and run `uvicorn` in `backend/`.
 2. Terminal B: run `npm run dev` in `frontend/`.
 3. Paste a YouTube URL and transcribe, then use **Find Key Moments** (requires `OPENAI_API_KEY`).
+4. When generating processed clips, the backend invokes Docker for `ffprobe` and subtitle-enabled FFmpeg rendering.
 
 ## Note on git
 

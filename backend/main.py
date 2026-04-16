@@ -130,6 +130,7 @@ class GenerateClipsRequest(BaseModel):
     source_video_path: Optional[str] = None
     video_id: Optional[str] = None
     moments: list[ClipGenerationMomentIn] = Field(default_factory=list)
+    transcript_words: list[WordSpan] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def request_must_have_source_and_moments(self) -> "GenerateClipsRequest":
@@ -149,7 +150,12 @@ class GeneratedClipOut(BaseModel):
     title: str
     takeaway: str
     reason: str
-    file_path: str
+    raw_file_path: str
+    raw_preview_url: str
+    processed_file_path: Optional[str] = None
+    processed_preview_url: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
     preview_url: str
 
 
@@ -251,6 +257,7 @@ def generate_clips_endpoint(body: GenerateClipsRequest):
         generated_clips, generation_errors = generate_clips(
             source_video=source_video,
             moments=moments,
+            transcript_words=body.transcript_words,
         )
         payload = {
             "video_id": source_video.video_id,
@@ -267,7 +274,12 @@ def generate_clips_endpoint(body: GenerateClipsRequest):
                     "title": clip.title,
                     "takeaway": clip.takeaway,
                     "reason": clip.reason,
-                    "file_path": clip.file_path,
+                    "raw_file_path": clip.raw_file_path,
+                    "raw_preview_url": clip.raw_preview_url,
+                    "processed_file_path": clip.processed_file_path,
+                    "processed_preview_url": clip.processed_preview_url,
+                    "width": clip.width,
+                    "height": clip.height,
                     "preview_url": clip.preview_url,
                 }
                 for clip in generated_clips

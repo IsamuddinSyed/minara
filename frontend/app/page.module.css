@@ -762,6 +762,13 @@
   gap: 0.85rem;
 }
 
+.previewHeaderMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .previewTitle {
   margin: 0;
   font-family: var(--font-amiri), serif;
@@ -941,6 +948,10 @@
 
   .previewHeader {
     flex-direction: column;
+  }
+
+  .previewHeaderMeta {
+    justify-content: flex-start;
   }
 
   .confidenceBadge {

@@ -1,0 +1,9 @@
+services:
+  render:
+    build:
+      context: .
+      dockerfile: docker/render/Dockerfile
+    image: minara-render:latest
+    working_dir: /workspace
+    volumes:
+      - ./backend/media:/workspace/media

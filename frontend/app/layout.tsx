@@ -14,7 +14,7 @@ const amiri = Amiri({
 });
 
 export const metadata: Metadata = {
-  title: "Minara",
+  title: "Minara.ai",
   description: "Minara — AI-powered clipping workflow for Islamic lecture videos",
 };
 

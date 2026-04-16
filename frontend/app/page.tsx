@@ -44,7 +44,12 @@ type GeneratedClip = {
   title: string;
   takeaway: string;
   reason: string;
-  file_path: string;
+  raw_file_path: string;
+  raw_preview_url: string;
+  processed_file_path?: string | null;
+  processed_preview_url?: string | null;
+  width?: number | null;
+  height?: number | null;
   preview_url: string;
 };
 
@@ -230,6 +235,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           youtube_url: youtubeUrl.trim(),
+          transcript_words: result?.words ?? [],
           moments: selectedMoments.map((clip, index) => ({
             rank: selectedMomentIndexes[index] + 1,
             start_time: clip.start_time,
@@ -269,7 +275,7 @@ export default function Home() {
           </div>
           <div>
             <p className={styles.brandEyebrow}>AI clipping studio</p>
-            <h1 className={styles.brandName}>Minara</h1>
+            <h1 className={styles.brandName}>minara.ai</h1>
           </div>
         </div>
         <p className={styles.topbarCopy}>
@@ -587,9 +593,14 @@ export default function Home() {
                           <h3 className={styles.previewTitle}>{clip.title}</h3>
                           <p className={styles.previewTakeaway}>{clip.takeaway}</p>
                         </div>
-                        <span className={styles.metaChip}>
-                          {formatDuration(clip.duration)}
-                        </span>
+                        <div className={styles.previewHeaderMeta}>
+                          <span className={styles.metaChip}>
+                            {formatDuration(clip.duration)}
+                          </span>
+                          <span className={styles.metaChip}>
+                            {clip.processed_preview_url ? "Processed" : "Raw"}
+                          </span>
+                        </div>
                       </div>
                       <video
                         className={styles.previewVideo}
@@ -601,6 +612,11 @@ export default function Home() {
                         <span>{formatTime(clip.start_time)}</span>
                         <span>{formatTime(clip.end_time)}</span>
                         <span>{clip.video_id}</span>
+                        {clip.width && clip.height ? (
+                          <span>
+                            {clip.width}x{clip.height}
+                          </span>
+                        ) : null}
                       </div>
                       <p className={styles.previewReason}>{clip.reason}</p>
                     </article>

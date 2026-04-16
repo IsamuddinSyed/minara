@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Sequence
 
 from media_paths import clip_output_dir, preview_url_for, stable_clip_filename
+from shortform_service import (
+    ProcessedClipAsset,
+    ShortformProcessingError,
+    render_shortform_clip,
+)
+from subtitles_service import SubtitleWord
 from video_source import SourceVideoAsset
 
 
@@ -35,8 +41,14 @@ class GeneratedClip:
     title: str
     takeaway: str
     reason: str
-    file_path: str
+    raw_file_path: str
+    raw_preview_url: str
     preview_url: str
+    processed_file_path: str | None = None
+    processed_preview_url: str | None = None
+    width: int | None = None
+    height: int | None = None
+    subtitle_file_path: str | None = None
 
 
 @dataclass(slots=True)
@@ -65,6 +77,32 @@ def _validate_clip_window(moment: ClipMomentSpec, source_duration: float | None)
         )
 
     return duration
+
+
+def _coerce_transcript_words(words: Sequence[object] | None) -> list[SubtitleWord]:
+    normalized: list[SubtitleWord] = []
+    if not words:
+        return normalized
+
+    for item in words:
+        text = getattr(item, "text", None)
+        if text is None:
+            text = getattr(item, "word", None)
+        start = getattr(item, "start", None)
+        end = getattr(item, "end", None)
+        if text is None or start is None or end is None:
+            continue
+        try:
+            normalized.append(
+                SubtitleWord(
+                    text=str(text),
+                    start=float(start),
+                    end=float(end),
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return normalized
 
 
 def _run_ffmpeg_clip(
@@ -116,6 +154,7 @@ def generate_clips(
     *,
     source_video: SourceVideoAsset,
     moments: Sequence[ClipMomentSpec],
+    transcript_words: Sequence[SubtitleWord] | None = None,
 ) -> tuple[list[GeneratedClip], list[ClipGenerationError]]:
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
@@ -124,6 +163,7 @@ def generate_clips(
     clips: list[GeneratedClip] = []
     errors: list[ClipGenerationError] = []
     output_dir = clip_output_dir(source_video.video_id)
+    normalized_words = _coerce_transcript_words(transcript_words)
 
     for index, moment in enumerate(moments, start=1):
         rank = moment.rank if moment.rank > 0 else index
@@ -143,6 +183,24 @@ def generate_clips(
                 start_time=moment.start_time,
                 duration=duration,
             )
+            processed_asset: ProcessedClipAsset | None = None
+            processing_detail: str | None = None
+            if transcript_words is not None:
+                try:
+                    processed_asset = render_shortform_clip(
+                        video_id=source_video.video_id,
+                        rank=rank,
+                        raw_clip_path=output_path,
+                        start_time=moment.start_time,
+                        end_time=moment.end_time,
+                        transcript_words=normalized_words,
+                    )
+                except ShortformProcessingError as exc:
+                    processing_detail = str(exc)
+
+            preview_url = (
+                processed_asset.preview_url if processed_asset else preview_url_for(output_path)
+            )
             clips.append(
                 GeneratedClip(
                     clip_id=clip_id,
@@ -153,10 +211,24 @@ def generate_clips(
                     title=moment.title,
                     takeaway=moment.takeaway,
                     reason=moment.reason,
-                    file_path=str(output_path),
-                    preview_url=preview_url_for(output_path),
+                    raw_file_path=str(output_path),
+                    raw_preview_url=preview_url_for(output_path),
+                    processed_file_path=processed_asset.file_path if processed_asset else None,
+                    processed_preview_url=processed_asset.preview_url if processed_asset else None,
+                    width=processed_asset.width if processed_asset else None,
+                    height=processed_asset.height if processed_asset else None,
+                    preview_url=preview_url,
                 )
             )
+            if processing_detail:
+                errors.append(
+                    ClipGenerationError(
+                        clip_id=clip_id,
+                        rank=rank,
+                        title=moment.title,
+                        detail=processing_detail,
+                    )
+                )
         except Exception as exc:
             output_path.unlink(missing_ok=True)
             errors.append(
