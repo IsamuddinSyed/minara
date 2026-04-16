@@ -8,14 +8,26 @@ import assemblyai as aai
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator, model_validator
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
+from clip_service import (
+    ClipGenerationSetupError,
+    ClipMomentSpec,
+    generate_clips,
+)
+from media_paths import MEDIA_ROOT, ensure_media_directories
 from moments_llm import select_candidate_sentence_ranges
 from moments_preprocess import build_sentence_units
 from moments_prompt import IDENTIFY_MOMENTS_SYSTEM, build_candidate_reasoning_input
 from moments_validate import validate_and_build_final_clips
+from video_source import (
+    MissingSourceVideoError,
+    SourceVideoDownloadError,
+    resolve_source_video,
+)
 
 _BACKEND_DIR = Path(__file__).resolve().parent
 load_dotenv(_BACKEND_DIR / ".env")
@@ -29,6 +41,8 @@ YOUTUBE_HINTS = (
 )
 
 app = FastAPI(title="Minara API", version="0.1.0")
+ensure_media_directories()
+app.mount("/media", StaticFiles(directory=str(MEDIA_ROOT)), name="media")
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,6 +108,67 @@ class MomentsResponse(BaseModel):
     clips: list[Clip] = Field(min_length=2, max_length=5)
 
 
+class ClipGenerationMomentIn(BaseModel):
+    rank: int | None = None
+    start_time: float
+    end_time: float
+    title: str
+    takeaway: str
+    reason: str
+
+    @field_validator("title", "takeaway", "reason")
+    @classmethod
+    def text_fields_must_not_be_blank(cls, v: str) -> str:
+        text = v.strip()
+        if not text:
+            raise ValueError("Text fields must not be empty")
+        return text
+
+
+class GenerateClipsRequest(BaseModel):
+    youtube_url: Optional[str] = None
+    source_video_path: Optional[str] = None
+    video_id: Optional[str] = None
+    moments: list[ClipGenerationMomentIn] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def request_must_have_source_and_moments(self) -> "GenerateClipsRequest":
+        if not self.youtube_url and not self.source_video_path:
+            raise ValueError("Provide youtube_url or source_video_path.")
+        if not self.moments:
+            raise ValueError("moments must contain at least one clip range.")
+        return self
+
+
+class GeneratedClipOut(BaseModel):
+    clip_id: str
+    video_id: str
+    start_time: float
+    end_time: float
+    duration: float
+    title: str
+    takeaway: str
+    reason: str
+    file_path: str
+    preview_url: str
+
+
+class ClipGenerationErrorOut(BaseModel):
+    clip_id: str
+    rank: int
+    title: str
+    detail: str
+
+
+class GenerateClipsResponse(BaseModel):
+    video_id: str
+    source_title: str
+    source_video_path: str
+    source_duration: Optional[float] = None
+    clips: list[GeneratedClipOut] = Field(default_factory=list)
+    errors: list[ClipGenerationErrorOut] = Field(default_factory=list)
+
+
 @app.post("/identify-moments")
 def identify_moments(body: TranscriptIn):
     api_key = os.getenv("OPENAI_API_KEY")
@@ -151,6 +226,76 @@ def identify_moments(body: TranscriptIn):
         raise HTTPException(
             status_code=500,
             detail=f"Key moment identification failed: {e}",
+        ) from e
+
+
+@app.post("/generate-clips")
+def generate_clips_endpoint(body: GenerateClipsRequest):
+    try:
+        source_video = resolve_source_video(
+            youtube_url=body.youtube_url,
+            source_video_path=body.source_video_path,
+            video_id=body.video_id,
+        )
+        moments = [
+            ClipMomentSpec(
+                rank=item.rank or index,
+                start_time=item.start_time,
+                end_time=item.end_time,
+                title=item.title,
+                takeaway=item.takeaway,
+                reason=item.reason,
+            )
+            for index, item in enumerate(body.moments, start=1)
+        ]
+        generated_clips, generation_errors = generate_clips(
+            source_video=source_video,
+            moments=moments,
+        )
+        payload = {
+            "video_id": source_video.video_id,
+            "source_title": source_video.title,
+            "source_video_path": str(source_video.source_path),
+            "source_duration": source_video.duration,
+            "clips": [
+                {
+                    "clip_id": clip.clip_id,
+                    "video_id": clip.video_id,
+                    "start_time": clip.start_time,
+                    "end_time": clip.end_time,
+                    "duration": clip.duration,
+                    "title": clip.title,
+                    "takeaway": clip.takeaway,
+                    "reason": clip.reason,
+                    "file_path": clip.file_path,
+                    "preview_url": clip.preview_url,
+                }
+                for clip in generated_clips
+            ],
+            "errors": [
+                {
+                    "clip_id": err.clip_id,
+                    "rank": err.rank,
+                    "title": err.title,
+                    "detail": err.detail,
+                }
+                for err in generation_errors
+            ],
+        }
+        validated = GenerateClipsResponse.model_validate(payload)
+        return validated.model_dump(mode="json")
+    except MissingSourceVideoError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except SourceVideoDownloadError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    except ClipGenerationSetupError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Clip generation failed: {e}",
         ) from e
 
 
