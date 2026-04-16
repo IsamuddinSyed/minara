@@ -63,6 +63,14 @@ function parseErrorDetail(data: unknown, fallback: string): string {
   return fallback;
 }
 
+function formatDuration(seconds?: number): string {
+  if (!seconds || Number.isNaN(seconds)) return "Unknown";
+  if (seconds < 60) return `${seconds.toFixed(0)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.round(seconds % 60);
+  return `${minutes}m ${String(remainder).padStart(2, "0")}s`;
+}
+
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -129,106 +137,237 @@ export default function Home() {
 
   return (
     <div className={styles.page}>
-      <main className={styles.main}>
-        <h1 className={styles.title}>Minara</h1>
-        <p className={styles.lead}>
-          Paste a YouTube URL to transcribe (word-level timestamps), then find
-          key moments for clips.
+      <header className={styles.topbar}>
+        <div className={styles.brandBlock}>
+          <div className={styles.brandMark} aria-hidden="true">
+            <span />
+            <span />
+          </div>
+          <div>
+            <p className={styles.brandEyebrow}>AI clipping studio</p>
+            <h1 className={styles.brandName}>Minara</h1>
+          </div>
+        </div>
+        <p className={styles.topbarCopy}>
+          Turn long Islamic lectures into short-form moments with transcript-led
+          review.
         </p>
+      </header>
 
-        <form className={styles.form} onSubmit={onSubmit}>
-          <input
-            className={styles.input}
-            type="url"
-            name="youtube_url"
-            placeholder="https://www.youtube.com/watch?v=…"
-            value={youtubeUrl}
-            onChange={(e) => setYoutubeUrl(e.target.value)}
-            disabled={loading}
-            required
-          />
-          <button className={styles.button} type="submit" disabled={loading}>
-            {loading ? "Transcribing…" : "Transcribe"}
-          </button>
-        </form>
-
-        {error ? <p className={styles.error}>{error}</p> : null}
-
-        {result ? (
-          <section className={styles.results} aria-live="polite">
-            <h2>Full transcript</h2>
-            <p className={styles.fullText}>{result.text ?? "(no text)"}</p>
-
-            <div className={styles.momentsActions}>
-              <button
-                type="button"
-                className={styles.buttonSecondary}
-                onClick={findKeyMoments}
-                disabled={momentsLoading || loading}
-              >
-                {momentsLoading ? "Finding moments…" : "Find Key Moments"}
-              </button>
+      <main className={styles.dashboard}>
+        <section className={styles.controlsColumn}>
+          <div className={styles.controlCard}>
+            <div className={styles.sectionIntro}>
+              <p className={styles.kicker}>Input</p>
+              <h2 className={styles.sectionTitle}>Paste YouTube URL</h2>
+              <p className={styles.sectionText}>
+                Submit a lecture or khutbah link to generate a timed transcript,
+                then surface clip-worthy moments.
+              </p>
             </div>
 
-            {momentsError ? (
-              <p className={styles.error}>{momentsError}</p>
-            ) : null}
+            <form className={styles.form} onSubmit={onSubmit}>
+              <label className={styles.label} htmlFor="youtube-url">
+                YouTube link
+              </label>
+              <input
+                id="youtube-url"
+                className={styles.input}
+                type="url"
+                name="youtube_url"
+                placeholder="https://www.youtube.com/watch?v=..."
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                disabled={loading}
+                required
+              />
 
-            {moments && moments.clips && moments.clips.length > 0 ? (
-              <div className={styles.momentsSection}>
-                <h2>Key moments</h2>
-                <ul className={styles.cardList}>
-                  {moments.clips.map((clip, i) => (
-                    <li key={i} className={styles.card}>
-                      <h3 className={styles.cardTitle}>{clip.title}</h3>
-                      <p className={styles.cardMeta}>
-                        <span>
-                          {formatTime(clip.start_time)} –{" "}
-                          {formatTime(clip.end_time)}
-                        </span>
-                        <span className={styles.cardMetaSep}>·</span>
-                        <span>{clip.duration.toFixed(1)}s</span>
-                        <span className={styles.cardMetaSep}>·</span>
-                        <span>
-                          Confidence: {clip.confidence_score.toFixed(2)}
-                        </span>
-                      </p>
-                      <p className={styles.cardTakeaway}>
-                        <strong>Takeaway:</strong> {clip.takeaway}
-                      </p>
-                      <p className={styles.cardReason}>
-                        <strong>Why:</strong> {clip.reason}
-                      </p>
-                      <p className={styles.cardExcerpt}>
-                        <strong>Excerpt:</strong> {clip.transcript_excerpt}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
+              <div className={styles.buttonGroup}>
+                <button
+                  className={styles.buttonPrimary}
+                  type="submit"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <span className={styles.buttonContent}>
+                      <span className={styles.spinner} aria-hidden="true" />
+                      Transcribing...
+                    </span>
+                  ) : (
+                    "Transcribe"
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className={styles.buttonSecondary}
+                  onClick={findKeyMoments}
+                  disabled={!result || momentsLoading || loading}
+                >
+                  {momentsLoading ? (
+                    <span className={styles.buttonContent}>
+                      <span className={styles.spinner} aria-hidden="true" />
+                      Analyzing moments...
+                    </span>
+                  ) : (
+                    "Find Key Moments"
+                  )}
+                </button>
               </div>
-            ) : null}
+            </form>
 
-            <h2>Words with timestamps</h2>
-            {result.words && result.words.length > 0 ? (
-              <div className={styles.words}>
-                <div className={`${styles.wordRow} ${styles.wordHeader}`}>
-                  <span>Start</span>
-                  <span>End</span>
-                  <span>Word</span>
+            {error ? <p className={styles.error}>{error}</p> : null}
+            {momentsError ? <p className={styles.error}>{momentsError}</p> : null}
+
+            <div className={styles.statusPanel}>
+              <div className={styles.statusRow}>
+                <span className={styles.statusLabel}>Transcript</span>
+                <span className={styles.statusValue}>
+                  {loading
+                    ? "Processing..."
+                    : result
+                      ? `${result.words.length} words captured`
+                      : "Awaiting input"}
+                </span>
+              </div>
+              <div className={styles.statusRow}>
+                <span className={styles.statusLabel}>Moments</span>
+                <span className={styles.statusValue}>
+                  {momentsLoading
+                    ? "Analyzing..."
+                    : moments?.clips?.length
+                      ? `${moments.clips.length} clips identified`
+                      : "No moments yet"}
+                </span>
+              </div>
+            </div>
+
+            <div className={styles.noteCard}>
+              <p className={styles.noteTitle}>Workflow</p>
+              <p className={styles.noteText}>
+                Start with transcription, review the timed transcript, then
+                generate clip candidates for reels and shorts.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.resultsColumn} aria-live="polite">
+          <div className={styles.panel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.kicker}>Transcript</p>
+                <h2 className={styles.panelTitle}>Transcript Review</h2>
+              </div>
+              {result ? (
+                <div className={styles.metaGroup}>
+                  <span className={styles.metaChip}>
+                    {formatDuration(result.duration)}
+                  </span>
+                  <span className={styles.metaChip}>
+                    {result.language?.toUpperCase() || "Unknown language"}
+                  </span>
                 </div>
-                {result.words.map((w, i) => (
-                  <div key={i} className={styles.wordRow}>
-                    <span>{formatTime(w.start)}</span>
-                    <span>{formatTime(w.end)}</span>
-                    <span>{w.word}</span>
+              ) : null}
+            </div>
+
+            {result ? (
+              <div className={styles.transcriptLayout}>
+                <div className={styles.transcriptSummary}>
+                  <p className={styles.summaryLabel}>Full transcript</p>
+                  <p className={styles.summaryText}>
+                    {result.text ?? "(no text)"}
+                  </p>
+                </div>
+
+                {result.words && result.words.length > 0 ? (
+                  <div className={styles.transcriptPanel}>
+                    <div
+                      className={`${styles.wordRow} ${styles.wordHeader}`}
+                    >
+                      <span>Start</span>
+                      <span>End</span>
+                      <span>Word</span>
+                    </div>
+                    <div className={styles.wordRows}>
+                      {result.words.map((w, i) => (
+                        <div key={i} className={styles.wordRow}>
+                          <span className={styles.timestamp}>
+                            {formatTime(w.start)}
+                          </span>
+                          <span className={styles.timestamp}>
+                            {formatTime(w.end)}
+                          </span>
+                          <span className={styles.wordText}>{w.word}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
+                ) : (
+                  <div className={styles.emptyStateCompact}>
+                    <div className={styles.emptyMotif} aria-hidden="true" />
+                    <p className={styles.emptyTitle}>No transcript data yet</p>
+                    <p className={styles.emptyText}>
+                      Word-level timestamps will appear here after
+                      transcription.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
-              <p className={styles.muted}>No word-level data in the response.</p>
+              <div className={styles.emptyState}>
+                <div className={styles.emptyMotif} aria-hidden="true" />
+                <p className={styles.emptyTitle}>Paste a YouTube link to begin</p>
+                <p className={styles.emptyText}>
+                  Your transcript timeline will appear here once audio has been
+                  processed.
+                </p>
+              </div>
             )}
-          </section>
-        ) : null}
+          </div>
+
+          <div className={styles.panel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.kicker}>Moments</p>
+                <h2 className={styles.panelTitle}>Clip Candidates</h2>
+              </div>
+            </div>
+
+            {moments && moments.clips && moments.clips.length > 0 ? (
+              <ul className={styles.cardList}>
+                {moments.clips.map((clip, i) => (
+                  <li key={i} className={styles.momentCard}>
+                    <div className={styles.cardWatermark} aria-hidden="true" />
+                    <div className={styles.cardHeader}>
+                      <h3 className={styles.cardTitle}>{clip.title}</h3>
+                      <span className={styles.confidenceBadge}>
+                        {Math.round(clip.confidence_score * 100)}% confidence
+                      </span>
+                    </div>
+                    <p className={styles.cardTakeaway}>{clip.takeaway}</p>
+                    <div className={styles.cardStats}>
+                      <span>{clip.duration.toFixed(1)}s</span>
+                      <span>{formatTime(clip.start_time)}</span>
+                      <span>{formatTime(clip.end_time)}</span>
+                    </div>
+                    <p className={styles.cardReason}>{clip.reason}</p>
+                    <p className={styles.cardExcerpt}>{clip.transcript_excerpt}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className={styles.emptyState}>
+                <div className={styles.emptyMotif} aria-hidden="true" />
+                <p className={styles.emptyTitle}>No moments identified yet</p>
+                <p className={styles.emptyText}>
+                  Generate key moments after transcription to review standout
+                  clips here.
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
       </main>
     </div>
   );
