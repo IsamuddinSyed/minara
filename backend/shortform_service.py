@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -93,36 +94,67 @@ def _escape_filter_path(path: str) -> str:
     return escaped
 
 
-def _build_hook_filter(hook_text_path: str) -> str:
-    safe_path = _escape_filter_path(hook_text_path)
+def _split_hook_title(headline: str) -> tuple[str, str]:
+    words = " ".join((headline or "").split()).split()
+    if not words:
+        return "", ""
+    if len(words) <= 2:
+        return "A reminder", " ".join(words)
+
+    main_word_count = 1 if len(words[-1]) >= 6 else 2
+    main_words = words[-main_word_count:]
+    support_words = words[:-main_word_count]
+    return " ".join(support_words), " ".join(main_words)
+
+
+def _build_title_text_filter(
+    *,
+    text_path: str,
+    font_size: int,
+    font_color: str,
+    y_expression: str,
+) -> str:
+    safe_path = _escape_filter_path(text_path)
     return (
         "drawtext="
-        f"fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:"
+        "font='Montserrat Bold':"
         f"textfile='{safe_path}':"
         "reload=0:"
-        "fontcolor=white:"
-        "fontsize=78:"
-        "line_spacing=8:"
-        "x='if(lt(t,0.3),(w-text_w)/2+((0.3-t)/0.3)*45,if(lt(t,2.55),(w-text_w)/2,(w-text_w)/2+((t-2.55)/0.35)*220))':"
-        "y='if(lt(t,0.3),h/3-text_h/2+((0.3-t)/0.3)*70,if(lt(t,2.55),h/3-text_h/2,h/3-text_h/2-((t-2.55)/0.35)*70))':"
-        "box=1:"
-        "boxcolor=black@0.6:"
-        "boxborderw=30:"
-        "borderw=3:"
-        "bordercolor=black@0.5:"
+        f"fontcolor={font_color}:"
+        f"fontsize={font_size}:"
+        "x='(w-text_w)/2':"
+        f"y='if(lt(t,0.25),{y_expression}+((0.25-t)/0.25)*52,if(lt(t,2.58),{y_expression},{y_expression}-((t-2.58)/0.32)*52))':"
+        "borderw=4:"
+        "bordercolor=black@0.42:"
         "shadowx=0:"
-        "shadowy=10:"
-        "shadowcolor=black@0.22:"
-        "alpha='if(lt(t,0.25),t/0.25,if(lt(t,2.55),1,max(0,(2.9-t)/0.35)))':"
+        "shadowy=8:"
+        "shadowcolor=black@0.28:"
+        "alpha='if(lt(t,0.2),t/0.2,if(lt(t,2.58),1,max(0,(2.9-t)/0.32)))':"
         "enable='lt(t,3)'"
     )
+
+
+def _build_hook_filter(support_text_path: str, main_text_path: str) -> str:
+    support_filter = _build_title_text_filter(
+        text_path=support_text_path,
+        font_size=44,
+        font_color="0xC9A84C",
+        y_expression="h/3-100",
+    )
+    main_filter = _build_title_text_filter(
+        text_path=main_text_path,
+        font_size=90,
+        font_color="0xC9A84C",
+        y_expression="h/3-42",
+    )
+    return f"{support_filter},{main_filter}"
 
 
 def _build_video_filter(
     width: int,
     height: int,
     subtitle_path: str,
-    hook_text_path: str | None,
+    hook_text_paths: tuple[str, str] | None,
 ) -> str:
     source_ratio = width / height
     target_ratio = TARGET_WIDTH / TARGET_HEIGHT
@@ -146,18 +178,65 @@ def _build_video_filter(
         "setsar=1,"
         f"subtitles='{_escape_filter_path(subtitle_path)}'"
     )
-    if hook_text_path:
-        filters += "," + _build_hook_filter(hook_text_path)
+    if hook_text_paths:
+        filters += "," + _build_hook_filter(*hook_text_paths)
     return filters
+
+
+def _write_camera_timing_file(path: Path) -> None:
+    path.write_text(
+        json.dumps({"high_impact_ranges": []}, ensure_ascii=True),
+        encoding="utf-8",
+    )
+
+
+def _run_face_tracking_camera(
+    *,
+    raw_clip_path: Path,
+    output_path: Path,
+    camera_timing_path: Path,
+) -> None:
+    container_input = host_media_path_to_container(raw_clip_path)
+    container_output = host_media_path_to_container(output_path)
+    container_timing = host_media_path_to_container(camera_timing_path)
+    logger.info("Starting face-tracking camera pass to %s", output_path)
+
+    try:
+        proc = run_in_render_container(
+            [
+                "python3",
+                "/opt/minara/face_track.py",
+                "--input",
+                container_input,
+                "--output",
+                container_output,
+                "--high-impact-ranges",
+                container_timing,
+            ]
+        )
+    except RenderContainerError as exc:
+        raise ShortformProcessingError(str(exc)) from exc
+
+    if proc.returncode != 0:
+        raise ShortformProcessingError(
+            proc.stderr.strip() or "Face-tracking camera pass failed."
+        )
+    if not output_path.exists():
+        raise ShortformProcessingError(
+            "Face-tracking camera pass completed but no output file was created."
+        )
+    _validate_processed_dimensions(output_path)
 
 
 def _run_shortform_render(
     *,
     raw_clip_path: Path,
+    video_input_path: Path,
     output_path: Path,
     video_filter: str,
 ) -> None:
-    container_input = host_media_path_to_container(raw_clip_path)
+    container_video_input = host_media_path_to_container(video_input_path)
+    container_audio_input = host_media_path_to_container(raw_clip_path)
     container_output = host_media_path_to_container(output_path)
     logger.info("Starting short-form render to %s", output_path)
     logger.info("Short-form FFmpeg filter graph: %s", video_filter)
@@ -171,9 +250,15 @@ def _run_shortform_render(
                 "-loglevel",
                 "error",
                 "-i",
-                container_input,
+                container_video_input,
+                "-i",
+                container_audio_input,
                 "-vf",
                 video_filter,
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0?",
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -182,6 +267,7 @@ def _run_shortform_render(
                 "23",
                 "-c:a",
                 "aac",
+                "-shortest",
                 "-movflags",
                 "+faststart",
                 container_output,
@@ -249,6 +335,8 @@ def render_shortform_clip(
         transcript_excerpt=transcript_excerpt,
     )
     hook_text_path: Path | None = None
+    hook_support_text_path: Path | None = None
+    hook_main_text_path: Path | None = None
     if hook_headline:
         hook_text_path = subtitles_dir / stable_hook_filename(
             video_id=video_id,
@@ -256,12 +344,16 @@ def render_shortform_clip(
             start_time=start_time,
             end_time=end_time,
         )
+        hook_support, hook_main = _split_hook_title(hook_headline)
+        hook_support_text_path = hook_text_path.with_name(f"{hook_text_path.stem}_support.txt")
+        hook_main_text_path = hook_text_path.with_name(f"{hook_text_path.stem}_main.txt")
         try:
             hook_text_path.write_text(hook_headline, encoding="utf-8")
+            hook_support_text_path.write_text(hook_support, encoding="utf-8")
+            hook_main_text_path.write_text(hook_main, encoding="utf-8")
         except Exception as exc:
             raise ShortformProcessingError(f"Hook generation failed: {exc}") from exc
 
-    width, height = _probe_dimensions(raw_clip_path)
     output_dir = processed_clip_output_dir(video_id)
     output_path = output_dir / stable_processed_clip_filename(
         video_id=video_id,
@@ -269,20 +361,34 @@ def render_shortform_clip(
         start_time=start_time,
         end_time=end_time,
     )
+    tracked_video_path = output_path.with_name(f"{output_path.stem}_camera.mp4")
+    camera_timing_path = subtitle_path.with_name(f"{subtitle_path.stem}_camera.json")
 
     try:
+        _write_camera_timing_file(camera_timing_path)
+        _run_face_tracking_camera(
+            raw_clip_path=raw_clip_path,
+            output_path=tracked_video_path,
+            camera_timing_path=camera_timing_path,
+        )
         container_subtitle_path = host_media_path_to_container(subtitle_path)
-        container_hook_path = (
-            host_media_path_to_container(hook_text_path) if hook_text_path else None
+        container_hook_paths = (
+            (
+                host_media_path_to_container(hook_support_text_path),
+                host_media_path_to_container(hook_main_text_path),
+            )
+            if hook_support_text_path and hook_main_text_path
+            else None
         )
         filter_graph = _build_video_filter(
-            width,
-            height,
+            TARGET_WIDTH,
+            TARGET_HEIGHT,
             container_subtitle_path,
-            container_hook_path,
+            container_hook_paths,
         )
         _run_shortform_render(
             raw_clip_path=raw_clip_path,
+            video_input_path=tracked_video_path,
             output_path=output_path,
             video_filter=filter_graph,
         )

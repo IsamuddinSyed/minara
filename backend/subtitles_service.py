@@ -12,6 +12,43 @@ logger = logging.getLogger(__name__)
 
 _CAPTION_COLOR_ASS = r"&H004CA8C9&"
 _ARABIC_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
+_PROPHET_SALUTATION_RE = re.compile(
+    r"\b("
+    r"muhamm?ad|"
+    r"ras[uo]ol\s*allah|"
+    r"ras[uo]olullah|"
+    r"(?:the\s+)?prophet|"
+    r"sall[au]ll[ao]h[uo]?|"
+    r"salla\s+allahu|"
+    r"peace\s+be\s+upon\s+him|"
+    r"pbuh|"
+    r"alayhi\s+w[au]sallam|"
+    r"alaihi\s+w[au]sallam|"
+    r"صلى\s+الله\s+عليه\s+وسلم"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_CAPTION_BOX_PATH = (
+    "m 54 0 l 806 0 "
+    "b 836 0 860 24 860 54 "
+    "l 860 116 "
+    "b 860 146 836 170 806 170 "
+    "l 54 170 "
+    "b 24 170 0 146 0 116 "
+    "l 0 54 "
+    "b 0 24 24 0 54 0"
+)
+_BADGE_BOX_PATH = (
+    "m 56 0 l 584 0 "
+    "b 615 0 640 25 640 56 "
+    "l 640 70 "
+    "b 640 101 615 126 584 126 "
+    "l 56 126 "
+    "b 25 126 0 101 0 70 "
+    "l 0 56 "
+    "b 0 25 25 0 56 0"
+)
 
 
 @dataclass(slots=True)
@@ -27,6 +64,7 @@ class SubtitleCue:
     end: float
     text: str
     highlighted_word: str | None = None
+    is_prophet_salutation: bool = False
 
 
 def _normalize_word(text: str) -> str:
@@ -39,6 +77,11 @@ def _escape_ass_text(text: str) -> str:
 
 def _contains_arabic(text: str) -> bool:
     return bool(_ARABIC_RE.search(text))
+
+
+def _is_prophet_salutation_text(text: str) -> bool:
+    normalized = " ".join((text or "").lower().split())
+    return bool(_PROPHET_SALUTATION_RE.search(normalized))
 
 
 def _style_for_cue(cue: SubtitleCue) -> str:
@@ -123,7 +166,7 @@ def _cue_animation_tags(cue: SubtitleCue) -> str:
     exit_start = max(0, duration_ms - 120)
 
     return (
-        r"{\an5\pos(540,1140)\fsp1"
+        r"{\an5\pos(540,1382)\fsp1"
         r"\fscx0\fscy0"
         rf"\t(0,{pop_in_peak},\fscx110\fscy110)"
         rf"\t({pop_in_peak},{pop_in_settle},\fscx100\fscy100)"
@@ -161,12 +204,14 @@ def build_phrase_cues(words: Sequence[SubtitleWord]) -> list[SubtitleCue]:
             return
         text = " ".join(item.text for item in current).strip()
         if text:
+            is_prophet_salutation = _is_prophet_salutation_text(text)
             cues.append(
                 SubtitleCue(
                     start=current[0].start,
                     end=current[-1].end,
                     text=text,
-                    highlighted_word=select_power_word(text),
+                    highlighted_word=None if is_prophet_salutation else select_power_word(text),
+                    is_prophet_salutation=is_prophet_salutation,
                 )
             )
         current = []
@@ -202,18 +247,47 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,Amiri,70,&H004CA8C9,&H004CA8C9,&H00161B2B,&HAA102418,-1,0,0,0,100,100,0.3,0,3,2,0,5,120,120,320,1
-Style: ArabicCaption,Amiri,70,&H004CA8C9,&H004CA8C9,&H00161B2B,&HAA102418,-1,0,0,0,100,100,0.3,0,3,2,0,5,120,120,320,1
+Style: Caption,Amiri,95,&H004CA8C9,&H004CA8C9,&H00161B2B,&H00000000,-1,0,0,0,100,100,0.3,0,1,4,0,5,120,120,320,1
+Style: ArabicCaption,Amiri,95,&H004CA8C9,&H004CA8C9,&H00161B2B,&H00000000,-1,0,0,0,100,100,0.3,0,1,4,0,5,120,120,320,1
+Style: CaptionBox,Arial,1,&H55182410,&H55182410,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: ProphetBadgeBox,Arial,1,&H005A6B1A,&H005A6B1A,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: ProphetBadgeText,Amiri,58,&H00FFFFFF,&H00FFFFFF,&H001B302A,&H00000000,-1,0,0,0,100,100,0,0,1,2,0,5,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = []
     for cue in cues:
+        start = _format_ass_timestamp(cue.start)
+        end = _format_ass_timestamp(cue.end)
+        if cue.is_prophet_salutation:
+            events.extend(
+                [
+                    "Dialogue: 0,"
+                    f"{start},{end},ProphetBadgeBox,,0,0,0,,"
+                    r"{\an7\pos(220,1078)\p1}"
+                    f"{_BADGE_BOX_PATH}",
+                    "Dialogue: 1,"
+                    f"{start},{end},ProphetBadgeText,,0,0,0,,"
+                    r"{\an4\pos(300,1140)}Rasul Allah",
+                    "Dialogue: 1,"
+                    f"{start},{end},ProphetBadgeText,,0,0,0,,"
+                    r"{\an6\pos(800,1140)\fs76}"
+                    "ﷺ",
+                ]
+            )
+            continue
+
         events.append(
             "Dialogue: 0,"
-            f"{_format_ass_timestamp(cue.start)},"
-            f"{_format_ass_timestamp(cue.end)},"
+            f"{start},{end},CaptionBox,,0,0,0,,"
+            r"{\an7\pos(110,1297)\p1}"
+            f"{_CAPTION_BOX_PATH}"
+        )
+        events.append(
+            "Dialogue: 1,"
+            f"{start},"
+            f"{end},"
             f"{_style_for_cue(cue)},,0,0,0,,"
             f"{_cue_animation_tags(cue)}"
             f"{_highlight_ass_text(cue.text, cue.highlighted_word)}"
