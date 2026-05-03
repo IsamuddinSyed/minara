@@ -10,6 +10,9 @@ from caption_styling import select_power_word
 
 logger = logging.getLogger(__name__)
 
+_CAPTION_COLOR_ASS = r"&H004CA8C9&"
+_ARABIC_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
+
 
 @dataclass(slots=True)
 class SubtitleWord:
@@ -32,6 +35,14 @@ def _normalize_word(text: str) -> str:
 
 def _escape_ass_text(text: str) -> str:
     return text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
+
+
+def _contains_arabic(text: str) -> bool:
+    return bool(_ARABIC_RE.search(text))
+
+
+def _style_for_cue(cue: SubtitleCue) -> str:
+    return "ArabicCaption" if _contains_arabic(cue.text) else "Caption"
 
 
 def _is_valid_ass_event_text(text: str) -> bool:
@@ -63,9 +74,9 @@ def _highlight_ass_text(text: str, highlighted_word: str | None) -> str:
         # ASS per-word boxing is brittle across renderers, so Phase B uses a
         # reliable high-contrast color + outline + bold fallback for one word.
         highlighted = (
-            r"{\1c&H0071CC2E&\3c&H00161B2B&\b1\fscx112\fscy112}"
+            r"{\1c" + _CAPTION_COLOR_ASS + r"\3c&H00161B2B&\b1\fscx112\fscy112}"
             + matched
-            + r"{\1c&H00F9F6F0&\3c&H002B2014&\b0\fscx100\fscy100}"
+            + r"{\1c" + _CAPTION_COLOR_ASS + r"\3c&H002B2014&\b0\fscx100\fscy100}"
         )
         candidate = before + highlighted + after
         if _is_valid_ass_event_text(candidate):
@@ -191,7 +202,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,DejaVu Sans,70,&H00F9F6F0,&H00F9F6F0,&H00161B2B,&HAA102418,-1,0,0,0,100,100,0.3,0,3,2,0,5,120,120,320,1
+Style: Caption,Amiri,70,&H004CA8C9,&H004CA8C9,&H00161B2B,&HAA102418,-1,0,0,0,100,100,0.3,0,3,2,0,5,120,120,320,1
+Style: ArabicCaption,Amiri,70,&H004CA8C9,&H004CA8C9,&H00161B2B,&HAA102418,-1,0,0,0,100,100,0.3,0,3,2,0,5,120,120,320,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -202,7 +214,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "Dialogue: 0,"
             f"{_format_ass_timestamp(cue.start)},"
             f"{_format_ass_timestamp(cue.end)},"
-            "Caption,,0,0,0,,"
+            f"{_style_for_cue(cue)},,0,0,0,,"
             f"{_cue_animation_tags(cue)}"
             f"{_highlight_ass_text(cue.text, cue.highlighted_word)}"
         )

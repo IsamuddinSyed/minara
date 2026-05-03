@@ -8,7 +8,9 @@ RUN apt-get update \
         ffmpeg \
         fontconfig \
         fonts-dejavu-core \
+        fonts-hosny-amiri \
         fonts-noto-core \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

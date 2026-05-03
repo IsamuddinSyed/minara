@@ -99,8 +99,8 @@ def _build_hook_filter(hook_text_path: str) -> str:
         "fontcolor=white:"
         "fontsize=78:"
         "line_spacing=8:"
-        "x='if(lt(t,0.18),(w-text_w)/2+((0.18-t)/0.18)*90,if(lt(t,2.35),(w-text_w)/2,(w-text_w)/2+((t-2.35)/0.65)*260))':"
-        "y='if(lt(t,0.18),150+((t/0.18)*40),if(lt(t,2.35),190,190-((t-2.35)/0.65)*60))':"
+        "x='if(lt(t,0.3),(w-text_w)/2+((0.3-t)/0.3)*45,if(lt(t,2.55),(w-text_w)/2,(w-text_w)/2+((t-2.55)/0.35)*220))':"
+        "y='if(lt(t,0.3),h/3-text_h/2+((0.3-t)/0.3)*70,if(lt(t,2.55),h/3-text_h/2,h/3-text_h/2-((t-2.55)/0.35)*70))':"
         "box=1:"
         "boxcolor=black@0.6:"
         "boxborderw=30:"
@@ -109,7 +109,7 @@ def _build_hook_filter(hook_text_path: str) -> str:
         "shadowx=0:"
         "shadowy=10:"
         "shadowcolor=black@0.22:"
-        "alpha='if(lt(t,0.18),t/0.18,if(lt(t,2.35),1,max(0,(3-t)/0.65)))':"
+        "alpha='if(lt(t,0.25),t/0.25,if(lt(t,2.55),1,max(0,(2.9-t)/0.35)))':"
         "enable='lt(t,3)'"
     )
 
