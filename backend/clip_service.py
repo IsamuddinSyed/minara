@@ -189,7 +189,7 @@ def generate_clips(
             )
             processed_asset: ProcessedClipAsset | None = None
             processing_detail: str | None = None
-            if transcript_words is not None:
+            if normalized_words:
                 try:
                     processed_asset = render_shortform_clip(
                         video_id=source_video.video_id,

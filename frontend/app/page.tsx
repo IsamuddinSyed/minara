@@ -114,6 +114,7 @@ function formatDuration(seconds?: number): string {
 
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [sourceYoutubeUrl, setSourceYoutubeUrl] = useState("");
   const [activeView, setActiveView] = useState<ViewTab>("moments");
   const [selectedMomentIndexes, setSelectedMomentIndexes] = useState<number[]>(
     [],
@@ -156,19 +157,21 @@ export default function Home() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    const submittedYoutubeUrl = youtubeUrl.trim();
     setError(null);
     setResult(null);
     setMoments(null);
     setMomentsError(null);
     setGeneratedClips(null);
     setClipsError(null);
+    setSourceYoutubeUrl("");
     resetClipSelection();
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/transcribe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ youtube_url: youtubeUrl.trim() }),
+        body: JSON.stringify({ youtube_url: submittedYoutubeUrl }),
       });
       const data: unknown = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -177,6 +180,7 @@ export default function Home() {
         );
       }
       setResult(data as TranscriptPayload);
+      setSourceYoutubeUrl(submittedYoutubeUrl);
       setActiveView("transcript");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -220,6 +224,11 @@ export default function Home() {
     const selectedMoments =
       moments?.clips?.filter((_, index) => selectedMomentIndexes.includes(index)) ??
       [];
+    if (!sourceYoutubeUrl) {
+      setClipsError("Transcribe a YouTube source before generating clips.");
+      setActiveView("transcript");
+      return;
+    }
     if (!selectedMoments.length) {
       setClipsError("Select at least one key moment before generating clips.");
       setActiveView("moments");
@@ -234,7 +243,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          youtube_url: youtubeUrl.trim(),
+          youtube_url: sourceYoutubeUrl,
           transcript_words: result?.words ?? [],
           moments: selectedMoments.map((clip, index) => ({
             rank: selectedMomentIndexes[index] + 1,

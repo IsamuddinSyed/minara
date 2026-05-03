@@ -86,7 +86,11 @@ def _validate_processed_dimensions(path: Path) -> None:
 
 
 def _escape_filter_path(path: str) -> str:
-    return path.replace("\\", "\\\\").replace(":", r"\:")
+    # FFmpeg filter args use backslash escaping even inside quoted values.
+    escaped = path.replace("\\", "\\\\")
+    for char in ("'", ":", ",", ";", "[", "]"):
+        escaped = escaped.replace(char, rf"\{char}")
+    return escaped
 
 
 def _build_hook_filter(hook_text_path: str) -> str:
