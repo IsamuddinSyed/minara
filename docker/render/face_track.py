@@ -5,6 +5,7 @@ import json
 import math
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -14,13 +15,29 @@ import numpy as np
 
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
-BASE_ZOOM = 1.15
-PUNCH_ZOOM = 1.30
-FOLLOW_LERP = 0.15
-DEADZONE_WIDTH_RATIO = 0.0
-EYE_Y_RATIO = 0.30
-DRIFT_AMPLITUDE_PX = 5.0
+MIN_ZOOM = 1.0
+MAX_ZOOM = 1.14
+PUNCH_ZOOM_BOOST = 1.04
+TARGET_FACE_HEIGHT_RATIO = 0.15
+HEADROOM_Y_RATIO = 1.0 / 3.0
+HEAD_TOP_PADDING_RATIO = 0.45
+FOLLOW_LERP_X = 0.08
+FOLLOW_LERP_Y = 0.045
+ZOOM_LERP = 0.06
+HORIZONTAL_DEADZONE_RATIO = 0.018
+MAX_HORIZONTAL_MOVE_RATIO = 0.018
+VERTICAL_DEADZONE_RATIO = 0.035
+MAX_VERTICAL_MOVE_RATIO = 0.008
+DRIFT_X_AMPLITUDE_PX = 0.0
+DRIFT_Y_AMPLITUDE_PX = 1.5
 DRIFT_FREQUENCY_HZ = 0.8
+
+
+@dataclass(slots=True)
+class FaceTarget:
+    center_x: float
+    head_top_y: float
+    face_height: float
 
 
 def _hash_noise(index: int, seed: int) -> float:
@@ -63,17 +80,34 @@ def _load_high_impact_ranges(path: Path | None) -> list[tuple[float, float]]:
     return sorted(normalized)
 
 
-def _zoom_for_time(frame_time: float, high_impact_ranges: list[tuple[float, float]]) -> float:
+def _is_high_impact_time(frame_time: float, high_impact_ranges: list[tuple[float, float]]) -> bool:
     for start_time, end_time in high_impact_ranges:
         if start_time <= frame_time <= end_time:
-            return PUNCH_ZOOM
-    return BASE_ZOOM
+            return True
+    return False
+
+
+def _target_zoom_for_face(
+    *,
+    frame_width: int,
+    frame_height: int,
+    face_height: float,
+    high_impact: bool,
+) -> float:
+    if face_height <= 0:
+        return MIN_ZOOM
+
+    cover_scale = max(TARGET_WIDTH / frame_width, TARGET_HEIGHT / frame_height)
+    desired_zoom = (TARGET_HEIGHT * TARGET_FACE_HEIGHT_RATIO) / (face_height * cover_scale)
+    if high_impact:
+        desired_zoom *= PUNCH_ZOOM_BOOST
+    return min(MAX_ZOOM, max(MIN_ZOOM, desired_zoom))
 
 
 def _detect_eye_anchor(
     detector: mp.solutions.face_mesh.FaceMesh,
     frame_bgr,
-) -> tuple[float, float] | None:
+) -> FaceTarget | None:
     height, width = frame_bgr.shape[:2]
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     results = detector.process(frame_rgb)
@@ -83,10 +117,15 @@ def _detect_eye_anchor(
     landmarks = results.multi_face_landmarks[0].landmark
     left_eye = landmarks[33]
     right_eye = landmarks[263]
-    nose_tip = landmarks[1]
-    return (
-        ((left_eye.x + right_eye.x) * 0.5) * width,
-        ((left_eye.y + right_eye.y + nose_tip.y) / 3.0) * height,
+    ys = [landmark.y for landmark in landmarks]
+    face_top_y = max(0.0, min(ys) * height)
+    face_bottom_y = min(float(height), max(ys) * height)
+    face_height = max(1.0, face_bottom_y - face_top_y)
+    head_top_y = max(0.0, face_top_y - (face_height * HEAD_TOP_PADDING_RATIO))
+    return FaceTarget(
+        center_x=((left_eye.x + right_eye.x) * 0.5) * width,
+        head_top_y=head_top_y,
+        face_height=face_height,
     )
 
 
@@ -126,26 +165,26 @@ def _resize_cover(frame, scale: float):
     return cv2.resize(frame, (scaled_width, scaled_height), interpolation=cv2.INTER_LINEAR)
 
 
-def _crop_with_camera(frame, anchor: tuple[float, float], zoom: float, frame_time: float):
+def _crop_with_camera(frame, target: FaceTarget, zoom: float, frame_time: float):
     height, width = frame.shape[:2]
     cover_scale = max(TARGET_WIDTH / width, TARGET_HEIGHT / height)
     scale = cover_scale * zoom
     resized = _resize_cover(frame, scale)
     resized_height, resized_width = resized.shape[:2]
 
-    anchor_x = anchor[0] * scale
-    anchor_y = anchor[1] * scale
-    drift_x = DRIFT_AMPLITUDE_PX * _smooth_value_noise(
+    anchor_x = target.center_x * scale
+    head_top_y = target.head_top_y * scale
+    drift_x = DRIFT_X_AMPLITUDE_PX * _smooth_value_noise(
         frame_time * DRIFT_FREQUENCY_HZ,
         seed=17,
     )
-    drift_y = DRIFT_AMPLITUDE_PX * _smooth_value_noise(
+    drift_y = DRIFT_Y_AMPLITUDE_PX * _smooth_value_noise(
         frame_time * DRIFT_FREQUENCY_HZ,
         seed=43,
     )
 
     crop_x = anchor_x - (TARGET_WIDTH * 0.5) + drift_x
-    crop_y = anchor_y - (TARGET_HEIGHT * EYE_Y_RATIO) + drift_y
+    crop_y = head_top_y - (TARGET_HEIGHT * HEADROOM_Y_RATIO) + drift_y
     max_x = max(0, resized_width - TARGET_WIDTH)
     max_y = max(0, resized_height - TARGET_HEIGHT)
     crop_x = int(round(min(max(crop_x, 0), max_x)))
@@ -205,8 +244,9 @@ def process_video(
         capture.release()
         raise RuntimeError("Could not open FFmpeg stdin for face-tracking output.")
 
-    smoothed_anchor: tuple[float, float] | None = None
-    last_anchor: tuple[float, float] | None = None
+    smoothed_target: FaceTarget | None = None
+    last_target: FaceTarget | None = None
+    smoothed_zoom: float | None = None
     frame_index = 0
     detection_window_hits = 0
 
@@ -225,26 +265,54 @@ def process_video(
 
             height, width = frame.shape[:2]
 
-            detected_anchor = _detect_eye_anchor(detector, frame)
-            if detected_anchor is not None:
+            detected_target = _detect_eye_anchor(detector, frame)
+            if detected_target is not None:
                 detection_window_hits += 1
-                last_anchor = detected_anchor
-            elif last_anchor is None:
-                last_anchor = (width * 0.5, height * EYE_Y_RATIO)
+                last_target = detected_target
+            elif last_target is None:
+                last_target = FaceTarget(
+                    center_x=width * 0.5,
+                    head_top_y=height * HEADROOM_Y_RATIO,
+                    face_height=height * 0.18,
+                )
 
-            if smoothed_anchor is None:
-                smoothed_anchor = last_anchor
+            if smoothed_target is None:
+                smoothed_target = last_target
             else:
-                dx = last_anchor[0] - smoothed_anchor[0]
-                dy = last_anchor[1] - smoothed_anchor[1]
-                smoothed_anchor = (
-                    smoothed_anchor[0] + dx * FOLLOW_LERP,
-                    smoothed_anchor[1] + dy * FOLLOW_LERP,
+                dx = last_target.center_x - smoothed_target.center_x
+                if abs(dx) < width * HORIZONTAL_DEADZONE_RATIO:
+                    dx = 0.0
+                else:
+                    max_horizontal_move = width * MAX_HORIZONTAL_MOVE_RATIO
+                    dx = max(-max_horizontal_move, min(max_horizontal_move, dx))
+
+                dy = last_target.head_top_y - smoothed_target.head_top_y
+                if abs(dy) < height * VERTICAL_DEADZONE_RATIO:
+                    dy = 0.0
+                else:
+                    max_vertical_move = height * MAX_VERTICAL_MOVE_RATIO
+                    dy = max(-max_vertical_move, min(max_vertical_move, dy))
+                smoothed_target = FaceTarget(
+                    center_x=smoothed_target.center_x + dx * FOLLOW_LERP_X,
+                    head_top_y=smoothed_target.head_top_y + dy * FOLLOW_LERP_Y,
+                    face_height=(
+                        smoothed_target.face_height
+                        + (last_target.face_height - smoothed_target.face_height) * ZOOM_LERP
+                    ),
                 )
 
             frame_time = frame_index / fps
-            zoom = _zoom_for_time(frame_time, high_impact_ranges)
-            output_frame = _crop_with_camera(frame, smoothed_anchor, zoom, frame_time)
+            target_zoom = _target_zoom_for_face(
+                frame_width=width,
+                frame_height=height,
+                face_height=smoothed_target.face_height,
+                high_impact=_is_high_impact_time(frame_time, high_impact_ranges),
+            )
+            if smoothed_zoom is None:
+                smoothed_zoom = target_zoom
+            else:
+                smoothed_zoom += (target_zoom - smoothed_zoom) * ZOOM_LERP
+            output_frame = _crop_with_camera(frame, smoothed_target, smoothed_zoom, frame_time)
             writer.stdin.write(np.ascontiguousarray(output_frame).tobytes())
             frame_index += 1
             if frame_index % 30 == 0:
