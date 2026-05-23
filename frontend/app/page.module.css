@@ -565,6 +565,38 @@
   font-weight: 700;
 }
 
+.generateOptions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.toggleOption {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  max-width: 28rem;
+  color: var(--primary);
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.toggleOption input {
+  flex-shrink: 0;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-top: 0.12rem;
+  accent-color: var(--primary);
+}
+
+.toggleOption small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 .selectionActions {
   display: flex;
   flex-wrap: wrap;
@@ -811,6 +843,30 @@
   margin: 0;
   color: var(--foreground);
   line-height: 1.55;
+}
+
+.downloadButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  min-height: 2.65rem;
+  padding: 0.68rem 1rem;
+  border: 1px solid rgba(26, 58, 42, 0.14);
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(26, 58, 42, 0.95), rgba(35, 79, 57, 0.92));
+  color: #f9f6f0;
+  font-weight: 800;
+  text-decoration: none;
+  box-shadow: 0 12px 22px rgba(26, 58, 42, 0.16);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.downloadButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(26, 58, 42, 0.22);
 }
 
 .partialErrors {

@@ -41,7 +41,7 @@ class ProcessedClipAsset:
     preview_url: str
     width: int
     height: int
-    subtitle_file_path: str
+    subtitle_file_path: str | None = None
     hook_headline: str | None = None
 
 
@@ -285,6 +285,22 @@ def _run_shortform_render(
     _validate_processed_dimensions(output_path)
 
 
+def _relative_words_for_clip(
+    transcript_words: Sequence[SubtitleWord],
+    *,
+    start_time: float,
+    end_time: float,
+) -> list[SubtitleWord]:
+    clip_words = words_for_clip(
+        transcript_words,
+        clip_start=start_time,
+        clip_end=end_time,
+    )
+    if not clip_words:
+        raise ShortformProcessingError("No transcript words were found for this clip range.")
+    return clip_words
+
+
 def render_shortform_clip(
     *,
     video_id: str,
@@ -296,63 +312,65 @@ def render_shortform_clip(
     title: str,
     takeaway: str,
     transcript_excerpt: str = "",
+    include_overlays: bool = True,
 ) -> ProcessedClipAsset:
     if not raw_clip_path.exists():
         raise ShortformProcessingError(f"Raw clip file does not exist: {raw_clip_path}")
-    if not transcript_words:
+    if include_overlays and not transcript_words:
         raise ShortformProcessingError("Missing subtitle timing data for clip processing.")
     if not math.isfinite(start_time) or not math.isfinite(end_time) or end_time <= start_time:
         raise ShortformProcessingError("Invalid clip timestamps for short-form processing.")
 
-    clip_words = words_for_clip(
-        transcript_words,
-        clip_start=start_time,
-        clip_end=end_time,
-    )
-    if not clip_words:
-        raise ShortformProcessingError("No transcript words were found for this clip range.")
-
-    cues: list[SubtitleCue] = build_phrase_cues(clip_words)
-    if not cues:
-        raise ShortformProcessingError("Could not build subtitle phrases for this clip.")
-
     subtitles_dir = subtitles_output_dir(video_id)
-    subtitle_path = subtitles_dir / stable_subtitle_filename(
-        video_id=video_id,
-        rank=rank,
-        start_time=start_time,
-        end_time=end_time,
-    )
-    try:
-        write_ass_subtitles(subtitle_path, cues)
-    except Exception as exc:
-        raise ShortformProcessingError(f"Subtitle generation failed: {exc}") from exc
-    logger.info("Generated subtitle file for clip render: %s", subtitle_path)
-
-    hook_headline = derive_hook_headline(
-        title=title,
-        takeaway=takeaway,
-        transcript_excerpt=transcript_excerpt,
-    )
+    subtitle_path: Path | None = None
+    hook_headline: str | None = None
     hook_text_path: Path | None = None
     hook_support_text_path: Path | None = None
     hook_main_text_path: Path | None = None
-    if hook_headline:
-        hook_text_path = subtitles_dir / stable_hook_filename(
+
+    if include_overlays:
+        clip_words = _relative_words_for_clip(
+            transcript_words,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        cues: list[SubtitleCue] = build_phrase_cues(clip_words)
+        if not cues:
+            raise ShortformProcessingError("Could not build subtitle phrases for this clip.")
+
+        subtitle_path = subtitles_dir / stable_subtitle_filename(
             video_id=video_id,
             rank=rank,
             start_time=start_time,
             end_time=end_time,
         )
-        hook_support, hook_main = _split_hook_title(hook_headline)
-        hook_support_text_path = hook_text_path.with_name(f"{hook_text_path.stem}_support.txt")
-        hook_main_text_path = hook_text_path.with_name(f"{hook_text_path.stem}_main.txt")
         try:
-            hook_text_path.write_text(hook_headline, encoding="utf-8")
-            hook_support_text_path.write_text(hook_support, encoding="utf-8")
-            hook_main_text_path.write_text(hook_main, encoding="utf-8")
+            write_ass_subtitles(subtitle_path, cues)
         except Exception as exc:
-            raise ShortformProcessingError(f"Hook generation failed: {exc}") from exc
+            raise ShortformProcessingError(f"Subtitle generation failed: {exc}") from exc
+        logger.info("Generated subtitle file for clip render: %s", subtitle_path)
+
+        hook_headline = derive_hook_headline(
+            title=title,
+            takeaway=takeaway,
+            transcript_excerpt=transcript_excerpt,
+        )
+        if hook_headline:
+            hook_text_path = subtitles_dir / stable_hook_filename(
+                video_id=video_id,
+                rank=rank,
+                start_time=start_time,
+                end_time=end_time,
+            )
+            hook_support, hook_main = _split_hook_title(hook_headline)
+            hook_support_text_path = hook_text_path.with_name(f"{hook_text_path.stem}_support.txt")
+            hook_main_text_path = hook_text_path.with_name(f"{hook_text_path.stem}_main.txt")
+            try:
+                hook_text_path.write_text(hook_headline, encoding="utf-8")
+                hook_support_text_path.write_text(hook_support, encoding="utf-8")
+                hook_main_text_path.write_text(hook_main, encoding="utf-8")
+            except Exception as exc:
+                raise ShortformProcessingError(f"Hook generation failed: {exc}") from exc
 
     output_dir = processed_clip_output_dir(video_id)
     output_path = output_dir / stable_processed_clip_filename(
@@ -362,7 +380,7 @@ def render_shortform_clip(
         end_time=end_time,
     )
     tracked_video_path = output_path.with_name(f"{output_path.stem}_camera.mp4")
-    camera_timing_path = subtitle_path.with_name(f"{subtitle_path.stem}_camera.json")
+    camera_timing_path = output_path.with_name(f"{output_path.stem}_camera.json")
 
     try:
         _write_camera_timing_file(camera_timing_path)
@@ -371,21 +389,24 @@ def render_shortform_clip(
             output_path=tracked_video_path,
             camera_timing_path=camera_timing_path,
         )
-        container_subtitle_path = host_media_path_to_container(subtitle_path)
-        container_hook_paths = (
-            (
-                host_media_path_to_container(hook_support_text_path),
-                host_media_path_to_container(hook_main_text_path),
+        if include_overlays and subtitle_path:
+            container_subtitle_path = host_media_path_to_container(subtitle_path)
+            container_hook_paths = (
+                (
+                    host_media_path_to_container(hook_support_text_path),
+                    host_media_path_to_container(hook_main_text_path),
+                )
+                if hook_support_text_path and hook_main_text_path
+                else None
             )
-            if hook_support_text_path and hook_main_text_path
-            else None
-        )
-        filter_graph = _build_video_filter(
-            TARGET_WIDTH,
-            TARGET_HEIGHT,
-            container_subtitle_path,
-            container_hook_paths,
-        )
+            filter_graph = _build_video_filter(
+                TARGET_WIDTH,
+                TARGET_HEIGHT,
+                container_subtitle_path,
+                container_hook_paths,
+            )
+        else:
+            filter_graph = "null"
         _run_shortform_render(
             raw_clip_path=raw_clip_path,
             video_input_path=tracked_video_path,
@@ -401,6 +422,6 @@ def render_shortform_clip(
         preview_url=preview_url_for(output_path),
         width=TARGET_WIDTH,
         height=TARGET_HEIGHT,
-        subtitle_file_path=str(subtitle_path),
+        subtitle_file_path=str(subtitle_path) if subtitle_path else None,
         hook_headline=hook_headline,
     )

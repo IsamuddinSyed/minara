@@ -51,6 +51,7 @@ type GeneratedClip = {
   width?: number | null;
   height?: number | null;
   preview_url: string;
+  export_url: string;
 };
 
 type GeneratedClipError = {
@@ -65,6 +66,7 @@ type GeneratedClipsResult = {
   source_title: string;
   source_video_path: string;
   source_duration?: number;
+  include_captions?: boolean;
   clips: GeneratedClip[];
   errors: GeneratedClipError[];
 };
@@ -132,6 +134,7 @@ export default function Home() {
   const [clipsError, setClipsError] = useState<string | null>(null);
   const [generatedClips, setGeneratedClips] =
     useState<GeneratedClipsResult | null>(null);
+  const [includeCaptions, setIncludeCaptions] = useState(true);
 
   function resetClipSelection() {
     setSelectedMomentIndexes([]);
@@ -244,6 +247,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           youtube_url: sourceYoutubeUrl,
+          include_captions: includeCaptions,
           transcript_words: result?.words ?? [],
           moments: selectedMoments.map((clip, index) => ({
             rank: selectedMomentIndexes[index] + 1,
@@ -511,11 +515,28 @@ export default function Home() {
               moments?.clips?.length ? (
                 <div className={styles.focusSection}>
                   <div className={styles.momentsToolbar}>
-                    <p className={styles.selectionSummary}>
-                      {selectedMomentsCount
-                        ? `${selectedMomentsCount} moment${selectedMomentsCount === 1 ? "" : "s"} selected`
-                        : "Select one or more moments to generate clips"}
-                    </p>
+                    <div className={styles.generateOptions}>
+                      <p className={styles.selectionSummary}>
+                        {selectedMomentsCount
+                          ? `${selectedMomentsCount} moment${selectedMomentsCount === 1 ? "" : "s"} selected`
+                          : "Select one or more moments to generate clips"}
+                      </p>
+                      <label className={styles.toggleOption}>
+                        <input
+                          type="checkbox"
+                          checked={includeCaptions}
+                          onChange={(e) => setIncludeCaptions(e.target.checked)}
+                        />
+                        <span>
+                          Add captions and title overlay
+                          <small>
+                            {includeCaptions
+                              ? "Processed clips include captions and the opening title."
+                              : "Processed clips use face tracking only, with no captions or title."}
+                          </small>
+                        </span>
+                      </label>
+                    </div>
                     <div className={styles.selectionActions}>
                       <button
                         type="button"
@@ -618,7 +639,11 @@ export default function Home() {
                             {formatDuration(clip.duration)}
                           </span>
                           <span className={styles.metaChip}>
-                            {clip.processed_preview_url ? "Processed" : "Raw"}
+                            {clip.processed_preview_url
+                              ? (generatedClips.include_captions ?? true)
+                                ? "Captions on"
+                                : "No captions"
+                              : "Raw"}
                           </span>
                         </div>
                       </div>
@@ -638,6 +663,12 @@ export default function Home() {
                           </span>
                         ) : null}
                       </div>
+                      <a
+                        className={styles.downloadButton}
+                        href={`${API_BASE}${clip.export_url}`}
+                      >
+                        Export MP4
+                      </a>
                       <p className={styles.previewReason}>{clip.reason}</p>
                     </article>
                   ))}

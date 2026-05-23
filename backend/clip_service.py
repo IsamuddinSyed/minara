@@ -159,6 +159,7 @@ def generate_clips(
     source_video: SourceVideoAsset,
     moments: Sequence[ClipMomentSpec],
     transcript_words: Sequence[SubtitleWord] | None = None,
+    include_captions: bool = True,
 ) -> tuple[list[GeneratedClip], list[ClipGenerationError]]:
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
@@ -189,7 +190,7 @@ def generate_clips(
             )
             processed_asset: ProcessedClipAsset | None = None
             processing_detail: str | None = None
-            if normalized_words:
+            if normalized_words or not include_captions:
                 try:
                     processed_asset = render_shortform_clip(
                         video_id=source_video.video_id,
@@ -201,6 +202,7 @@ def generate_clips(
                         title=moment.title,
                         takeaway=moment.takeaway,
                         transcript_excerpt="",
+                        include_overlays=include_captions,
                     )
                 except ShortformProcessingError as exc:
                     processing_detail = str(exc)

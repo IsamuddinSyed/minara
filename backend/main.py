@@ -8,6 +8,7 @@ import assemblyai as aai
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -54,6 +55,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _download_url_for_preview(preview_url: str) -> str:
+    media_prefix = "/media/"
+    if not preview_url.startswith(media_prefix):
+        return preview_url
+    return f"/download-media/{preview_url[len(media_prefix):]}"
+
+
+@app.get("/download-media/{media_path:path}")
+def download_media(media_path: str):
+    requested = Path(media_path)
+    if requested.is_absolute() or ".." in requested.parts:
+        raise HTTPException(status_code=400, detail="Invalid media path.")
+
+    resolved = (MEDIA_ROOT / requested).resolve()
+    try:
+        resolved.relative_to(MEDIA_ROOT.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid media path.") from exc
+
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=404, detail="Media file not found.")
+    if resolved.suffix.lower() != ".mp4":
+        raise HTTPException(status_code=415, detail="Only MP4 exports are supported.")
+
+    return FileResponse(
+        path=str(resolved),
+        media_type="video/mp4",
+        filename=resolved.name,
+    )
 
 
 class TranscribeRequest(BaseModel):
@@ -131,6 +163,7 @@ class GenerateClipsRequest(BaseModel):
     video_id: Optional[str] = None
     moments: list[ClipGenerationMomentIn] = Field(default_factory=list)
     transcript_words: list[WordSpan] = Field(default_factory=list)
+    include_captions: bool = True
 
     @model_validator(mode="after")
     def request_must_have_source_and_moments(self) -> "GenerateClipsRequest":
@@ -159,6 +192,7 @@ class GeneratedClipOut(BaseModel):
     subtitle_file_path: Optional[str] = None
     hook_headline: Optional[str] = None
     preview_url: str
+    export_url: str
 
 
 class ClipGenerationErrorOut(BaseModel):
@@ -173,6 +207,7 @@ class GenerateClipsResponse(BaseModel):
     source_title: str
     source_video_path: str
     source_duration: Optional[float] = None
+    include_captions: bool = True
     clips: list[GeneratedClipOut] = Field(default_factory=list)
     errors: list[ClipGenerationErrorOut] = Field(default_factory=list)
 
@@ -260,12 +295,14 @@ def generate_clips_endpoint(body: GenerateClipsRequest):
             source_video=source_video,
             moments=moments,
             transcript_words=body.transcript_words,
+            include_captions=body.include_captions,
         )
         payload = {
             "video_id": source_video.video_id,
             "source_title": source_video.title,
             "source_video_path": str(source_video.source_path),
             "source_duration": source_video.duration,
+            "include_captions": body.include_captions,
             "clips": [
                 {
                     "clip_id": clip.clip_id,
@@ -285,6 +322,7 @@ def generate_clips_endpoint(body: GenerateClipsRequest):
                     "subtitle_file_path": clip.subtitle_file_path,
                     "hook_headline": clip.hook_headline,
                     "preview_url": clip.preview_url,
+                    "export_url": _download_url_for_preview(clip.preview_url),
                 }
                 for clip in generated_clips
             ],
